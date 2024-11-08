@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Error handling
+set -e
+
+# Create output file
+echo "Creating output file..."
+{
+    echo "Date and Time:"
+    date
+} > /home/amitdemo/output.txt
+
+# Upload to blob and stop VM using PowerShell
+pwsh << 'EOF'
+# Connect using managed identity
+Connect-AzAccount -Identity
+
+# Upload to blob storage
+$storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
+Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob "demo01" -Context $storageAccount.Context
+
+Write-Output "Script executed successfully. VM will stop now."
+
+Start-Sleep -Seconds 2
+
+Stop-AzVM -ResourceGroupName "CoE" -Name "amit-demo" -Force
+EOF
