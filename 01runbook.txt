@@ -10,29 +10,48 @@ workflow start-vm {
         $ResourceGroupName = $using:ResourceGroupName
         $VMName = $using:VMName
         $scriptPath = $using:scriptPath
-
-        # Connect using Managed Identity
-        Connect-AzAccount -Identity
-
-        # Start the VM
-        Write-Output "Starting VM: $VMName"
-        Start-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName
-
-        # Simple check for VM status
-        do {
-            $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName -Status
-            $powerState = ($vm.Statuses | Where-Object Code -like "PowerState/*").DisplayStatus
-            Write-Output "Current VM state: $powerState"
-            if ($powerState -ne "VM running") {
-                Start-Sleep -Seconds 10
+        
+        try {
+            # Connect using Managed Identity
+            Connect-AzAccount -Identity
+    
+            # Start the VM
+            Write-Output "Starting VM: $VMName"
+            Start-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName
+    
+            # Simple check for VM status
+            do {
+                $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName -Status
+                $powerState = ($vm.Statuses | Where-Object Code -like "PowerState/*").DisplayStatus
+                Write-Output "Current VM state: $powerState"
+                if ($powerState -ne "VM running") {
+                    Start-Sleep -Seconds 10
+                }
+            } while ($powerState -ne "VM running")
+    
+            # Execute commands
+            Write-Output "Setting permissions..."
+            $permResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunShellScript' -ScriptString "sudo chmod +x $scriptPath; cd /home/amitdemo; sudo chown amitdemo:amitdemo $scriptPath"
+            
+            if ($permResult.Status -ne "Succeeded") {
+                throw "Failed to set permissions: $($permResult.Error)"
             }
-        } while ($powerState -ne "VM running")
-
-        # Execute commands
-        Write-Output "Setting permissions..."
-        Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunShellScript' -ScriptString "sudo chmod +x $scriptPath; cd /home/amitdemo; sudo chown amitdemo:amitdemo $scriptPath"
-
-        Write-Output "Executing shell script on VM..."
-        Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunShellScript' -ScriptString "cd /home/amitdemo; sudo -u amitdemo bash $scriptPath"
+            
+            Write-Output "Executing shell script on VM..."
+            $scriptResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunShellScript' -ScriptString "cd /home/amitdemo; sudo -u amitdemo bash $scriptPath"
+            
+            if ($scriptResult.Status -eq "Succeeded") {
+                Write-Output "Script executed successfully. Stopping VM now."
+                Stop-AzVM -ResourceGroupName $ResourceGroupName -Name $VMName -Force
+            } else {
+                Write-Output "Script execution failed with status: $($scriptResult.Status)"
+                Write-Output "Error details: $($scriptResult.Error)"
+                Write-Output "VM will remain running."
+            }
+        }
+        catch {
+            Write-Error "An error occurred: $_"
+            throw
+        }
     }
 }
