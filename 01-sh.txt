@@ -1,16 +1,14 @@
 #!/bin/bash
 
-# Error handling
 set -e
 
-# Create output file
 echo "Creating output file..."
 {
     echo "Date and Time:"
     date
 } > /home/amitdemo/output.txt
 
-# Upload to blob and create folders using PowerShell
+
 pwsh << 'EOF'
 # Connect using managed identity
 Connect-AzAccount -Identity
@@ -19,22 +17,26 @@ Connect-AzAccount -Identity
 $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
 $context = $storageAccount.Context
 
-# Get current date components
 $year = (Get-Date).Year
 $month = (Get-Date).Month.ToString("00")
 $day = (Get-Date).Day.ToString("00")
 
-# Create the dynamic path
 $blobPath = "$year/$month/$day/output.txt"
+$fullBlobPath = "folder01/$blobPath"
 
-# Upload the file to the first folder with dynamic date-based path
-Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob "folder01/$blobPath" -Context $context
+# Check if blob exists
+$blobExists = Get-AzStorageBlob -Container "amitdemovm" -Blob $fullBlobPath -Context $context -ErrorAction SilentlyContinue
 
-# Create an empty blob for the second folder
-# Creating a temporary empty file and uploading it
-$tempFile = New-TemporaryFile
-Set-AzStorageBlobContent -File $tempFile.FullName -Container "amitdemovm" -Blob "folder02/.folder" -Context $context
-Remove-Item $tempFile
+if ($blobExists) {
+    Write-Output "File already present in the container at path: $fullBlobPath"
+} else {
+    Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob $fullBlobPath -Context $context
+    Write-Output "File uploaded successfully to: $fullBlobPath"
 
-Write-Output "Script executed successfully. The files have been uploaded to the container."
+    # Create an empty blob for the second folder
+    # Creating a temporary empty file and uploading it
+    $tempFile = New-TemporaryFile
+    Set-AzStorageBlobContent -File $tempFile.FullName -Container "amitdemovm" -Blob "folder02/.folder" -Context $context
+    Remove-Item $tempFile
+}
 EOF
