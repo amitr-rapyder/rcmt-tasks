@@ -19,8 +19,16 @@ Connect-AzAccount -Identity
 $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
 $context = $storageAccount.Context
 
-# Upload the file to the first folder
-Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob "folder01/demo01" -Context $context
+# Get current date components
+$year = (Get-Date).Year
+$month = (Get-Date).Month.ToString("00")
+$day = (Get-Date).Day.ToString("00")
+
+# Create the dynamic path
+$blobPath = "$year/$month/$day/output.txt"
+
+# Upload the file to the first folder with dynamic date-based path
+Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob "folder01/$blobPath" -Context $context
 
 # Create an empty blob for the second folder
 # Creating a temporary empty file and uploading it
