@@ -10,10 +10,9 @@ echo "Creating output file..."
 
 
 pwsh << 'EOF'
-# Connect using managed identity
+
 Connect-AzAccount -Identity
 
-# Get the storage account
 $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
 $context = $storageAccount.Context
 
@@ -24,19 +23,25 @@ $day = (Get-Date).Day.ToString("00")
 $blobPath = "$year/$month/$day/output.txt"
 $fullBlobPath = "folder01/$blobPath"
 
-# Check if blob exists
-$blobExists = Get-AzStorageBlob -Container "amitdemovm" -Blob $fullBlobPath -Context $context -ErrorAction SilentlyContinue
+Write-Output "Checking for file at path: folder01/$year/$month/$day/output.txt"
 
-if ($blobExists) {
-    Write-Output "File already present in the container at path: $fullBlobPath"
-} else {
+$todayBlobPath = "folder01/$year/$month/$day/output.txt"
+
+try {
+    $blobExists = Get-AzStorageBlob -Container "amitdemovm" -Blob $todayBlobPath -Context $context -ErrorAction Stop
+    Write-Output "STATUS: File already present for today ($day/$month/$year) at path: $todayBlobPath"
+} catch {
+    Write-Output "STATUS: No existing file found for today. Creating new file..."
     Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob $fullBlobPath -Context $context
-    Write-Output "File uploaded successfully to: $fullBlobPath"
+    Write-Output "STATUS: File uploaded successfully to today's folder: $fullBlobPath"
 
     # Create an empty blob for the second folder
     # Creating a temporary empty file and uploading it
     $tempFile = New-TemporaryFile
     Set-AzStorageBlobContent -File $tempFile.FullName -Container "amitdemovm" -Blob "folder02/.folder" -Context $context
+    Write-Output "STATUS: Created .folder in folder02"
     Remove-Item $tempFile
 }
+
+Write-Output "Script execution completed for date: $day/$month/$year"
 EOF
