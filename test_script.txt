@@ -1,0 +1,93 @@
+#!/bin/bash
+set -e
+
+echo "Starting test suite for Azure blob upload script..."
+
+# Test file path
+OUTPUT_FILE="/home/amitdemo/output.txt"
+
+# Function to test Azure connection and storage account access
+test_azure_connection() {
+    echo "Testing Azure connectivity..."
+    pwsh << 'EOF'
+    try {
+        Connect-AzAccount -Identity
+        $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
+        Write-Output "Azure connection successful"
+        return $true
+    } catch {
+        Write-Error "Failed to connect to Azure: $_"
+        return $false
+    }
+EOF
+}
+
+# Function to test file access with previous date
+test_previous_date_access() {
+    echo "Testing previous date file access with retry mechanism..."
+    pwsh << 'EOF'
+    # Set up storage context
+    $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
+    $context = $storageAccount.Context
+
+    # Test parameters
+    $maxRetries = 5
+    $retryCount = 0
+    $previousDate = (Get-Date).AddDays(-1)
+    $year = $previousDate.Year
+    $month = $previousDate.Month.ToString("00")
+    $day = $previousDate.Day.ToString("00")
+    $blobPath = "$year/$month/$day/output.txt"
+
+    Write-Output "Attempting to access blob: $blobPath"
+
+    while ($retryCount -lt $maxRetries) {
+        try {
+            $blob = Get-AzStorageBlob -Container "amitdemovm" -Blob $blobPath -Context $context -ErrorAction Stop
+            Write-Output "Successfully accessed blob"
+            break
+        } catch {
+            $retryCount++
+            Write-Output "Attempt $retryCount of $maxRetries failed"
+            
+            if ($retryCount -eq $maxRetries) {
+                Write-Output "Failed to access blob after $maxRetries attempts"
+                return $false
+            }
+            Start-Sleep -Seconds 5
+        }
+    }
+EOF
+}
+
+# Main test execution
+main() {
+    echo "=== Starting Tests ==="
+    
+    # Test 1: Check if output file exists
+    if [ ! -f "$OUTPUT_FILE" ]; then
+        echo "Creating test output file..."
+        echo "Test content $(date)" > "$OUTPUT_FILE"
+    fi
+    
+    # Test 2: Test Azure connection
+    echo "Testing Azure connection..."
+    if ! test_azure_connection; then
+        echo "❌ Azure connection test failed"
+        exit 1
+    fi
+    echo "✅ Azure connection test passed"
+    
+    # Test 3: Test previous date access with retry
+    echo "Testing previous date access..."
+    if ! test_previous_date_access; then
+        echo "❌ Previous date access test failed"
+        exit 1
+    fi
+    echo "✅ Previous date access test passed"
+    
+    echo "=== All tests completed ==="
+}
+
+# Run the test suite
+main
