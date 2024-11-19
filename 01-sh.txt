@@ -1,47 +1,104 @@
 #!/bin/bash
-
 set -e
 
-echo "Creating output file..."
-{
-    echo "Date and Time:"
-    date
-} > /home/amitdemo/output.txt
+OUTPUT_FILE="/home/amitdemo/output.txt"
 
+create_and_upload_file() {
+    echo "Creating output file..."
+    {
+        echo "Date and Time:"
+        date
+    } > "$OUTPUT_FILE"
 
-pwsh << 'EOF'
+    pwsh << 'EOF'
+    # Connect using managed identity
+    Connect-AzAccount -Identity
 
-Connect-AzAccount -Identity
+    # Get the storage account and context
+    $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
+    $context = $storageAccount.Context
 
-$storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
-$context = $storageAccount.Context
+    $year = (Get-Date).Year
+    $month = (Get-Date).Month.ToString("00")
+    $day = (Get-Date).Day.ToString("00")
 
-$year = (Get-Date).Year
-$month = (Get-Date).Month.ToString("00")
-$day = (Get-Date).Day.ToString("00")
+    $blobPath = "$year/$month/$day/output.txt"
 
-$blobPath = "$year/$month/$day/output.txt"
-$fullBlobPath = "folder01/$blobPath"
+    # Upload the file with force flag
+    Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob $blobPath -Context $context -Force
 
-Write-Output "Checking for file at path: folder01/$year/$month/$day/output.txt"
-
-$todayBlobPath = "folder01/$year/$month/$day/output.txt"
-
-try {
-    $blobExists = Get-AzStorageBlob -Container "amitdemovm" -Blob $todayBlobPath -Context $context -ErrorAction Stop
-    Write-Output "STATUS: File already present for today ($day/$month/$year) at path: $todayBlobPath"
-} catch {
-    Write-Output "STATUS: No existing file found for today. Creating new file..."
-    Set-AzStorageBlobContent -File "/home/amitdemo/output.txt" -Container "amitdemovm" -Blob $fullBlobPath -Context $context
-    Write-Output "STATUS: File uploaded successfully to today's folder: $fullBlobPath"
-
-    # Create an empty blob for the second folder
-    # Creating a temporary empty file and uploading it
+    # Create an empty folder marker
     $tempFile = New-TemporaryFile
-    Set-AzStorageBlobContent -File $tempFile.FullName -Container "amitdemovm" -Blob "folder02/.folder" -Context $context
-    Write-Output "STATUS: Created .folder in folder02"
+    Set-AzStorageBlobContent -File $tempFile.FullName -Container "amitdemovm" -Blob "folder02/.folder" -Context $context -Force
     Remove-Item $tempFile
+EOF
 }
 
-Write-Output "Script execution completed for date: $day/$month/$year"
+test_any_date() {
+    echo "Testing previous date file access"
+    pwsh << 'EOF'
+    # Connect using managed identity
+    Connect-AzAccount -Identity
+
+    # Set up storage context
+    $storageAccount = Get-AzStorageAccount -ResourceGroupName "CoE" -Name "amitdemovm"
+    $context = $storageAccount.Context
+
+    # Test parameters
+    $maxRetries = 5
+    $retryCount = 0
+    $previousDate = (Get-Date).AddDays(-1)
+    $year = $previousDate.Year
+    $month = $previousDate.Month.ToString("00")
+    $day = $previousDate.Day.ToString("00")
+    $blobPath = "$year/$month/$day/output.txt"
+
+    Write-Output "Attempting to access blob: $blobPath"
+    $success = $false
+
+    while ($retryCount -lt $maxRetries) {
+        try {
+            $blob = Get-AzStorageBlob -Container "amitdemovm" -Blob $blobPath -Context $context -ErrorAction Stop
+            Write-Output "Successfully accessed blob"
+            $success = $true
+            break
+        } catch {
+            $retryCount++
+            Write-Output "Attempt $retryCount of $maxRetries failed: $_"
+            
+            #call to the bash function
+            create_and_upload_file
+            Write-Output "Created and Uploaded file"
+            
+            if ($retryCount -eq $maxRetries) {
+                Write-Output "Failed to access blob after $maxRetries attempts"
+            } else {
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+
+    if ($success) {
+        Write-Output "true"
+        exit 0
+    } else {
+        Write-Output "false"
+        exit 1
+    }
 EOF
+}
+
+main() {
+    echo "=== Starting Script ==="
+    
+    echo "Testing previous date access..."
+    if ! test_any_date; then
+        echo "Previous date access test failed after maximum retries"
+        exit 1
+    fi
+    echo "Previous date access test passed"
+    
+    echo "=== Script completed ==="
+}
+
+main
