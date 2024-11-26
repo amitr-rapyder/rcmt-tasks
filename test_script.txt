@@ -3,6 +3,12 @@ set -e
 
 output_file="/home/amitdemo/output.txt"
 
+list_subscriptions() {
+    echo "=== Listing Subscriptions ==="
+    
+    az account list --output table
+}
+
 create_and_upload_file() {
     echo "Creating new file..."
     az login --identity > /dev/null || return 1
@@ -13,10 +19,21 @@ create_and_upload_file() {
         --query '[0].value' -o tsv) || return 1
     
     current_date=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "Date and Time:\n$current_date" > "$output_file"
+    subscription_id=$(az account show --query 'id' -o tsv)
     
-    blob_path="$(date '+%Y/%m/%d')/output.txt"
+    # Create output file with report header
+    echo -e "Azure VM Report - $current_date\n" > "$output_file"
+    echo -e "Subscription ID: $subscription_id\n" >> "$output_file"
+    echo "=== Virtual Machine Status ===" >> "$output_file"
     
+    # Use Steampipe to query VM details and append to output file
+    steampipe query "select name, region, resource_group, size from azure_compute_virtual_machine;" \
+        --output csv >> "$output_file" 2>/dev/null || echo "No VMs found or error accessing VM data" >> "$output_file"
+    
+    # Prepare blob path with date and subscription ID
+    blob_path="$(date '+%Y/%m/%d')/${subscription_id}-daily-report.txt"
+    
+    # Upload to Azure Blob Storage
     az storage blob upload \
         --account-name "amitdemovm" \
         --account-key "$storage_key" \
@@ -41,7 +58,8 @@ test_date_access() {
     max_retries=5
     retry_count=0
     check_date=$(date -d "9 days ago" '+%Y/%m/%d')
-    target_blob_path="$check_date/output.txt"
+    subscription_id=$(az account show --query 'id' -o tsv)
+    target_blob_path="$check_date/${subscription_id}-daily-report.txt"
     
     echo "Checking for blob: $target_blob_path"
     
@@ -88,10 +106,17 @@ test_date_access() {
 
 main() {
     echo "=== Script Started ==="
+    
+    list_subscriptions || {
+        echo "Failed to list subscriptions"
+        exit 1
+    }
+    
     if ! test_date_access; then
         echo "=== Script Failed ==="
         exit 1
     fi
+    
     echo "=== Script Completed Successfully ==="
     exit 0
 }
